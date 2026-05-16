@@ -1,0 +1,74 @@
+{
+    "levels": [
+        {
+            "id": 1,
+            "rows": 3,
+            "cols": 8,
+            "bricks_layout": "classic",
+            "description": "Классический уровень"
+        },
+        {
+            "id": 2,
+            "rows": 4,
+            "cols": 9,
+            "bricks_layout": "pyramid",
+            "description": "Пирамида"
+        },
+        {
+            "id": 3,
+            "rows": 5,
+            "cols": 10,
+            "bricks_layout": "zigzag",
+            "description": "Зигзаг"
+        },
+        {
+            "id": 4,
+            "rows": 4,
+            "cols": 10,
+            "bricks_layout": "double",
+            "description": "Двойной слой"
+        },
+        {
+            "id": 5,
+            "rows": 5,
+            "cols": 11,
+            "bricks_layout": "rainbow",
+            "description": "Радуга"
+        },
+        {
+            "id": 6,
+            "rows": 5,
+            "cols": 12,
+            "bricks_layout": "checkerboard",
+            "description": "Шахматная доска"
+        },
+        {
+            "id": 7,
+            "rows": 6,
+            "cols": 12,
+            "bricks_layout": "castle",
+            "description": "Крепость"
+        },
+        {
+            "id": 8,
+            "rows": 6,
+            "cols": 13,
+            "bricks_layout": "spiral",
+            "description": "Спираль"
+        },
+        {
+            "id": 9,
+            "rows": 7,
+            "cols": 14,
+            "bricks_layout": "dense",
+            "description": "Плотный слой"
+        },
+        {
+            "id": 10,
+            "rows": 8,
+            "cols": 15,
+            "bricks_layout": "boss",
+            "description": "Финальный босс"
+        }
+    ]
+}
