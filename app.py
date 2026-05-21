@@ -183,9 +183,21 @@ class Menu:
                 data = json.load(f)
                 unlocked_levels = data.get('unlocked_levels', [1])
                 high_scores = data.get('high_scores', {})
-                return unlocked_levels, high_scores
+                tutorial_shown = data.get('tutorial_shown', False)
+                return unlocked_levels, high_scores, tutorial_shown
         except:
-            return [1], {}
+            return [1], {}, False
+    
+    def save_tutorial_shown(self):
+        try:
+            with open('progress.json', 'r') as f:
+                data = json.load(f)
+        except:
+            data = {'unlocked_levels': [1], 'high_scores': {}, 'tutorial_shown': False}
+        
+        data['tutorial_shown'] = True
+        with open('progress.json', 'w') as f:
+            json.dump(data, f, indent=4)
     
     def draw(self, unlocked_levels, high_scores):
         self.screen.fill(BLACK)
@@ -300,12 +312,13 @@ class Menu:
 
 # Основной класс игры
 class Arkanoid:
-    def __init__(self, start_level=1):
+    def __init__(self, start_level=1, tutorial_mode=False):
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         pygame.display.set_caption("Арканоид")
         self.clock = pygame.time.Clock()
         self.font = pygame.font.Font(None, 36)
         self.small_font = pygame.font.Font(None, 24)
+        self.big_font = pygame.font.Font(None, 48)
         
         # Загрузка уровней
         self.load_levels()
@@ -321,24 +334,40 @@ class Arkanoid:
         self.game_over = False
         self.level_complete = False
         
+        # Обучающие элементы
+        self.tutorial_mode = tutorial_mode
+        self.tutorial_step = 0  # 0 - обучение движению, 1 - обучение бонусу
+        self.tutorial_waiting_for_move = False
+        self.tutorial_bonus_caught = False
+        self.tutorial_message_timer = 0
+        self.tutorial_ball_active = False
+        self.tutorial_bonus_fall_timer = 0
+        self.tutorial_bonus_respawn_delay = 60
+        
+        # Защита для новичков
+        self.noob_protection_active = False
+        
         # Инициализация игровых объектов
         self.init_game_objects()
         
+        # Если обучение, запускаем первый шаг
+        if self.tutorial_mode:
+            self.tutorial_waiting_for_move = True
+            self.tutorial_ball_active = False
+            self.balls = []  # Шарика нет во время обучения
+    
     def load_levels(self):
         try:
             with open('levels.json', 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 self.levels = data['levels']
         except FileNotFoundError:
-            # Создание уровней по умолчанию
             self.levels = []
             for i in range(1, 11):
                 self.levels.append({
                     "id": i,
-                    "rows": min(3 + i // 2, 8),
-                    "cols": min(8 + i // 2, 15),
-                    "bricks_layout": "classic",
-                    "description": f"Уровень {i}"
+                    "name": f"Уровень {i}",
+                    "layout": [[1] * (8 + i//2) for _ in range(3 + i//3)]
                 })
     
     def load_progress(self):
@@ -367,18 +396,29 @@ class Arkanoid:
         with open('progress.json', 'w') as f:
             json.dump(data, f, indent=4)
     
+    def spawn_tutorial_bonus(self):
+        if len(self.bricks) > 0:
+            random_brick = random.choice(self.bricks)
+            bonus = Bonus(random_brick.rect.centerx, random_brick.rect.centery, BONUS_BIG_PADDLE)
+            bonus.speed_y = 2
+            self.bonuses.append(bonus)
+            self.tutorial_bonus_fall_timer = 0
+    
     def init_game_objects(self):
         self.paddle = Paddle()
-        self.balls = [Ball(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100)]
+        
+        if not self.tutorial_mode or self.tutorial_ball_active:
+            self.balls = [Ball(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100)]
+        else:
+            self.balls = []
+            
         self.bricks = []
         self.bonuses = []
         self.create_bricks()
         
-        # Подсчет количества бонусов
         total_bricks = len(self.bricks)
         self.bonus_count = max(1, total_bricks // 5)
         
-        # Равномерно распределяем бонусы по всем кирпичам
         if total_bricks > 0:
             step = total_bricks / self.bonus_count
             self.bonus_brick_indices = [int(i * step) for i in range(self.bonus_count)]
@@ -388,9 +428,8 @@ class Arkanoid:
         self.bricks_hit_count = 0
     
     def create_bricks(self):
-        """Создание кирпичей из layout уровня"""
         level_data = self.levels[self.current_level - 1]
-        layout = level_data['layout']
+        layout = level_data.get('layout', [])
         
         if not layout:
             return
@@ -405,7 +444,6 @@ class Arkanoid:
         start_y = 60
         spacing = 5
         
-        # Цвета для разной прочности
         strength_colors = {
             1: GREEN,
             2: ORANGE,
@@ -415,42 +453,39 @@ class Arkanoid:
         for row in range(rows):
             for col in range(cols):
                 strength = layout[row][col]
-                
-                # Пропускаем пустые места
                 if strength == 0:
                     continue
-                
-                # Ограничиваем прочность от 1 до 3
                 strength = max(1, min(3, strength))
-                
                 x = start_x + col * (brick_width + spacing)
                 y = start_y + row * (brick_height + spacing)
                 color = strength_colors[strength]
-                
                 brick = Brick(x, y, color, strength)
                 self.bricks.append(brick)
-
+    
     def spawn_bonus(self, x, y, brick_index):
-        """Создание бонуса при разрушении кирпича"""
-        # Проверяем, должен ли из этого кирпича выпасть бонус
         if brick_index in self.bonus_brick_indices:
-            # Определяем тип бонуса по порядковому номеру
             bonus_index = self.bonus_brick_indices.index(brick_index)
             bonus_type_index = bonus_index % 3
-            
             if bonus_type_index == 0:
                 bonus_type = BONUS_BIG_PADDLE
             elif bonus_type_index == 1:
                 bonus_type = BONUS_MULTI_BALL
             else:
                 bonus_type = BONUS_EXTRA_LIFE
-            
             self.bonuses.append(Bonus(x, y, bonus_type))
             return True
         return False
     
     def apply_bonus(self, bonus):
-        """Применение эффекта бонуса"""
+        if self.tutorial_mode and self.tutorial_step == 1:
+            self.tutorial_bonus_caught = True
+            self.tutorial_step = 2
+            self.tutorial_message_timer = 180
+            self.tutorial_ball_active = True
+            if len(self.balls) == 0:
+                self.balls = [Ball(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100)]
+            return
+        
         if bonus.type == BONUS_EXTRA_LIFE:
             self.lives += 1
         elif bonus.type == BONUS_MULTI_BALL:
@@ -463,14 +498,21 @@ class Arkanoid:
             self.paddle.make_big()
     
     def handle_collisions(self):
-        # Столкновение шариков с платформой
+        if self.tutorial_mode and not self.tutorial_ball_active:
+            for bonus in self.bonuses[:]:
+                if bonus.rect.colliderect(self.paddle.rect):
+                    self.apply_bonus(bonus)
+                    self.bonuses.remove(bonus)
+                elif bonus.rect.top > SCREEN_HEIGHT:
+                    self.bonuses.remove(bonus)
+            return
+        
         for ball in self.balls[:]:
             if ball.rect.colliderect(self.paddle.rect):
                 hit_pos = (ball.rect.centerx - self.paddle.rect.left) / self.paddle.width
                 ball.speed_x = (hit_pos - 0.5) * 8
                 ball.speed_y = -abs(ball.speed_y)
         
-        # Столкновение шариков с кирпичами
         for ball in self.balls[:]:
             for brick in self.bricks[:]:
                 if ball.rect.colliderect(brick.rect):
@@ -479,15 +521,12 @@ class Arkanoid:
                         brick_x = brick.rect.centerx
                         brick_y = brick.rect.centery
                         current_brick_index = self.bricks_hit_count
-                        
                         self.bricks.remove(brick)
                         self.score += 10
-                        
                         self.spawn_bonus(brick_x, brick_y, current_brick_index)
                         self.bricks_hit_count += 1
                     break
         
-        # Столкновение бонусов с платформой
         for bonus in self.bonuses[:]:
             if bonus.rect.colliderect(self.paddle.rect):
                 self.apply_bonus(bonus)
@@ -499,39 +538,134 @@ class Arkanoid:
         if self.paused or self.game_over or self.level_complete:
             return
         
+        if self.tutorial_message_timer > 0:
+            self.tutorial_message_timer -= 1
+        
         self.paddle.update()
         
-        for ball in self.balls[:]:
-            ball.update()
+        # Обновление шариков
+        if not self.tutorial_mode or self.tutorial_ball_active:
+            for ball in self.balls[:]:
+                ball.update()
+                
+                # Защита для новичков - отскок от низа ТОЛЬКО когда жизни = 0 и уровень = 1
+                if self.current_level == 1 and self.lives == 0 and ball.rect.bottom >= SCREEN_HEIGHT:
+                    ball.speed_y = -abs(ball.speed_y)
+                    ball.y = SCREEN_HEIGHT - ball.radius - 1
         
         for bonus in self.bonuses[:]:
             bonus.update()
         
-        # Проверка выхода шариков
-        lost_balls = [ball for ball in self.balls if ball.is_off_screen()]
-        for ball in lost_balls:
-            self.balls.remove(ball)
-        
-        # Если все шарики потеряны
-        if len(self.balls) == 0:
-            self.lives -= 1
-            if self.lives > 0:
-                self.balls = [Ball(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100)]
-                self.paddle = Paddle()
+        # Обучающий режим
+        if self.tutorial_mode and self.tutorial_step == 1 and not self.tutorial_bonus_caught:
+            if len(self.bonuses) == 0:
+                self.tutorial_bonus_fall_timer += 1
+                if self.tutorial_bonus_fall_timer >= self.tutorial_bonus_respawn_delay:
+                    self.spawn_tutorial_bonus()
             else:
-                self.game_over = True
+                self.tutorial_bonus_fall_timer = 0
+        
+        # Проверка выхода шариков (только если игра активна)
+        if not self.tutorial_mode or self.tutorial_ball_active:
+            lost_balls = [ball for ball in self.balls if ball.is_off_screen()]
+            for ball in lost_balls:
+                self.balls.remove(ball)
+        
+        # Обработка потери всех шариков
+        if len(self.balls) == 0 and (not self.tutorial_mode or self.tutorial_ball_active):
+            if self.current_level == 1 and self.lives == 0:
+                # Защита уже активна, но если шариков нет - создаём новый
+                self.balls = [Ball(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100)]
+                # Платформу НЕ сбрасываем в центр
+            elif self.current_level == 1 and self.lives > 0:
+                # На первом уровне с жизнями - тратим жизнь
+                self.lives -= 1
+                if self.lives > 0:
+                    self.balls = [Ball(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100)]
+                    # Платформу НЕ сбрасываем в центр
+                else:
+                    # Жизни стали равны 0 - активируем защиту
+                    self.balls = [Ball(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100)]
+                    # Платформу НЕ сбрасываем в центр
+            else:
+                # Для других уровней (не первый)
+                self.lives -= 1
+                if self.lives > 0:
+                    self.balls = [Ball(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100)]
+                    # Платформу НЕ сбрасываем в центр
+                else:
+                    self.game_over = True
         
         self.handle_collisions()
         
-        # Проверка победы на уровне
         if len(self.bricks) == 0:
             self.level_complete = True
             self.save_progress()
-            
             next_level = self.current_level + 1
             if next_level <= 10 and next_level not in self.unlocked_levels:
                 self.unlocked_levels.append(next_level)
                 self.save_progress_callback()
+    
+    def draw_tutorial(self):
+        if self.tutorial_mode:
+            if self.tutorial_step == 0 and self.tutorial_waiting_for_move:
+                text_bg = pygame.Surface((SCREEN_WIDTH, 200))
+                text_bg.set_alpha(180)
+                text_bg.fill(BLACK)
+                text_bg_rect = text_bg.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+                self.screen.blit(text_bg, text_bg_rect)
+                
+                text1 = self.big_font.render("ОБУЧЕНИЕ", True, YELLOW)
+                text1_rect = text1.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 60))
+                self.screen.blit(text1, text1_rect)
+                
+                text2 = self.font.render("Чтобы двигать платформу, используйте стрелки", True, WHITE)
+                text2_rect = text2.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 10))
+                self.screen.blit(text2, text2_rect)
+                
+                left_arrow = self.big_font.render("←", True, CYAN)
+                right_arrow = self.big_font.render("→", True, CYAN)
+                self.screen.blit(left_arrow, (SCREEN_WIDTH // 2 - 100, SCREEN_HEIGHT // 2 + 30))
+                self.screen.blit(right_arrow, (SCREEN_WIDTH // 2 + 80, SCREEN_HEIGHT // 2 + 30))
+                
+                text3 = self.small_font.render("Нажмите любую стрелку, чтобы продолжить", True, GREEN)
+                text3_rect = text3.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 80))
+                self.screen.blit(text3, text3_rect)
+                
+            elif self.tutorial_step == 1 and not self.tutorial_bonus_caught:
+                text_bg = pygame.Surface((SCREEN_WIDTH, 150))
+                text_bg.set_alpha(180)
+                text_bg.fill(BLACK)
+                text_bg_rect = text_bg.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+                self.screen.blit(text_bg, text_bg_rect)
+                
+                text1 = self.font.render("Отлично! Теперь поймай падающий бонус!", True, YELLOW)
+                text1_rect = text1.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 40))
+                self.screen.blit(text1, text1_rect)
+                
+                text2 = self.small_font.render("Передвинь платформу под бонус", True, WHITE)
+                text2_rect = text2.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+                self.screen.blit(text2, text2_rect)
+                
+                if len(self.bonuses) == 0:
+                    text3 = self.small_font.render("Бонус скоро появится...", True, CYAN)
+                    text3_rect = text3.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 40))
+                    self.screen.blit(text3, text3_rect)
+                else:
+                    text3 = self.small_font.render("Лови бонус платформой!", True, GREEN)
+                    text3_rect = text3.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 40))
+                    self.screen.blit(text3, text3_rect)
+            
+            elif self.tutorial_step == 2 and self.tutorial_message_timer > 0:
+                text_bg = pygame.Surface((SCREEN_WIDTH, 100))
+                text_bg.set_alpha(180)
+                text_bg.fill(BLACK)
+                text_bg_rect = text_bg.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+                self.screen.blit(text_bg, text_bg_rect)
+                
+                text = self.big_font.render("Отлично! Теперь играй!", True, GREEN)
+                text_rect = text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+                self.screen.blit(text, text_rect)
     
     def draw(self):
         self.screen.fill(BLACK)
@@ -547,39 +681,36 @@ class Arkanoid:
         for bonus in self.bonuses:
             bonus.draw(self.screen)
         
-        # Информация об уровне
         level_text = self.font.render(f"Уровень: {self.current_level}", True, WHITE)
         self.screen.blit(level_text, (10, 10))
         
-        # Отображение рекорда уровня
         current_level_str = str(self.current_level)
         if current_level_str in self.high_scores:
             record_text = self.small_font.render(f"Рекорд: {self.high_scores[current_level_str]}", True, YELLOW)
             self.screen.blit(record_text, (10, 45))
         
-        # Отображение счета
         score_text = self.font.render(f"Счет: {self.score}", True, WHITE)
         self.screen.blit(score_text, (10, 80))
         
-        # Отображение жизней
         lives_text = self.font.render(f"Жизни: {self.lives}", True, WHITE)
         self.screen.blit(lives_text, (10, 120))
         
-        # Отображение количества шариков
-        balls_text = self.small_font.render(f"Шарики: {len(self.balls)}", True, WHITE)
-        self.screen.blit(balls_text, (10, 160))
+        if not self.tutorial_mode or self.tutorial_ball_active:
+            balls_text = self.small_font.render(f"Шарики: {len(self.balls)}", True, WHITE)
+            self.screen.blit(balls_text, (10, 160))
         
-        # Отображение информации о бонусах
         bonuses_text = self.small_font.render(f"Бонусов на уровне: {self.bonus_count}", True, GREEN)
         self.screen.blit(bonuses_text, (10, 190))
         
-        # Отображение паузы
+        if self.current_level == 1 and self.lives == 0:
+            protect_text = self.small_font.render("РЕЖИМ ПОМОЩИ: шарик не падает", True, CYAN)
+            self.screen.blit(protect_text, (SCREEN_WIDTH - 280, 10))
+        
         if self.paused:
             pause_text = self.font.render("ПАУЗА", True, WHITE)
             text_rect = pause_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
             self.screen.blit(pause_text, text_rect)
         
-        # Отображение завершения уровня
         if self.level_complete:
             complete_text = self.font.render("УРОВЕНЬ ПРОЙДЕН!", True, GREEN)
             text_rect = complete_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 40))
@@ -589,7 +720,6 @@ class Arkanoid:
             text_rect = continue_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 20))
             self.screen.blit(continue_text, text_rect)
         
-        # Отображение Game Over
         if self.game_over:
             game_over_text = self.font.render("ИГРА ОКОНЧЕНА", True, RED)
             text_rect = game_over_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 40))
@@ -598,6 +728,8 @@ class Arkanoid:
             restart_text = self.small_font.render("Нажмите R для перезапуска или ESC для выхода в меню", True, WHITE)
             text_rect = restart_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 20))
             self.screen.blit(restart_text, text_rect)
+        
+        self.draw_tutorial()
         
         pygame.display.flip()
     
@@ -611,14 +743,21 @@ class Arkanoid:
                 elif event.key == pygame.K_p:
                     self.paused = not self.paused
                 elif event.key == pygame.K_r and self.game_over:
-                    self.__init__(self.current_level)
+                    self.__init__(self.current_level, self.tutorial_mode)
                 elif event.key == pygame.K_RETURN and self.level_complete:
                     if self.current_level < 10:
                         self.current_level += 1
                         self.init_game_objects()
                         self.level_complete = False
+                        self.noob_protection_active = False
                     else:
                         self.game_over = True
+                
+                if self.tutorial_mode and self.tutorial_step == 0 and self.tutorial_waiting_for_move:
+                    if event.key in [pygame.K_LEFT, pygame.K_RIGHT]:
+                        self.tutorial_waiting_for_move = False
+                        self.tutorial_step = 1
+                        self.spawn_tutorial_bonus()
         
         if not self.paused and not self.game_over and not self.level_complete:
             keys = pygame.key.get_pressed()
@@ -636,7 +775,6 @@ class Arkanoid:
             self.update()
             self.draw()
             self.clock.tick(FPS)
-        
         return self.score
 
 # Главная функция
@@ -647,7 +785,7 @@ def main():
     menu = Menu(screen)
     
     while True:
-        unlocked_levels, high_scores = menu.load_progress()
+        unlocked_levels, high_scores, tutorial_shown = menu.load_progress()
         menu.draw(unlocked_levels, high_scores)
         action, level = menu.handle_events(unlocked_levels)
         
@@ -655,8 +793,12 @@ def main():
             pygame.quit()
             sys.exit()
         elif action == 'play':
-            game = Arkanoid(level)
+            is_tutorial = (not tutorial_shown and level == 1)
+            game = Arkanoid(level, is_tutorial)
             game.run()
+            
+            if is_tutorial and game.tutorial_bonus_caught:
+                menu.save_tutorial_shown()
 
 if __name__ == "__main__":
     main()
