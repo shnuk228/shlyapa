@@ -1,6 +1,6 @@
 import sys
 import os
-import json  # <-- ЭТО СТРОКУ НУЖНО ДОБАВИТЬ!
+import json
 import pygame
 import pytest
 
