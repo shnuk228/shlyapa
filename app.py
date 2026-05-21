@@ -388,128 +388,48 @@ class Arkanoid:
         self.bricks_hit_count = 0
     
     def create_bricks(self):
-        """Создание кирпичей в зависимости от уровня"""
+        """Создание кирпичей из layout уровня"""
         level_data = self.levels[self.current_level - 1]
-        rows = level_data['rows']
-        cols = level_data['cols']
-        layout = level_data['bricks_layout']
+        layout = level_data['layout']
+        
+        if not layout:
+            return
+        
+        rows = len(layout)
+        cols = len(layout[0]) if rows > 0 else 0
         
         brick_width = 70
         brick_height = 22
-        start_x = (SCREEN_WIDTH - (cols * (brick_width + 5))) // 2
+        total_width = cols * (brick_width + 5)
+        start_x = (SCREEN_WIDTH - total_width) // 2
         start_y = 60
         spacing = 5
         
-        colors = [RED, ORANGE, YELLOW, GREEN, CYAN, BLUE, PURPLE, PINK]
+        # Цвета для разной прочности
+        strength_colors = {
+            1: GREEN,
+            2: ORANGE,
+            3: RED
+        }
         
         for row in range(rows):
             for col in range(cols):
+                strength = layout[row][col]
+                
+                # Пропускаем пустые места
+                if strength == 0:
+                    continue
+                
+                # Ограничиваем прочность от 1 до 3
+                strength = max(1, min(3, strength))
+                
                 x = start_x + col * (brick_width + spacing)
                 y = start_y + row * (brick_height + spacing)
+                color = strength_colors[strength]
                 
-                # Разные раскладки кирпичей
-                if layout == "classic":
-                    strength = 1
-                    color = colors[row % len(colors)]
-                    brick = Brick(x, y, color, strength)
-                    self.bricks.append(brick)
-                
-                elif layout == "pyramid":
-                    # Пирамида: кирпичи только по центру, сужаются к верху
-                    if col >= (cols - rows + row) // 2 and col < (cols + rows - row) // 2:
-                        strength = 1
-                        color = colors[row % len(colors)]
-                        brick = Brick(x, y, color, strength)
-                        self.bricks.append(brick)
-                
-                elif layout == "zigzag":
-                    # Зигзаг: прочные кирпичи в шахматном порядке
-                    if (row + col) % 3 == 0:
-                        strength = 3
-                        color = RED
-                    elif (row + col) % 3 == 1:
-                        strength = 2
-                        color = ORANGE
-                    else:
-                        strength = 1
-                        color = YELLOW
-                    brick = Brick(x, y, color, strength)
-                    self.bricks.append(brick)
-                
-                elif layout == "double":
-                    # Двойной слой: первые 2 ряда прочные
-                    if row < 2:
-                        strength = 3
-                        color = RED
-                    else:
-                        strength = 1
-                        color = colors[row % len(colors)]
-                    brick = Brick(x, y, color, strength)
-                    self.bricks.append(brick)
-                
-                elif layout == "rainbow":
-                    # Радуга: каждый ряд своего цвета
-                    strength = 1
-                    color = colors[row % len(colors)]
-                    brick = Brick(x, y, color, strength)
-                    self.bricks.append(brick)
-                
-                elif layout == "checkerboard":
-                    # Шахматная доска: только черные клетки
-                    if (row + col) % 2 == 1:
-                        strength = 2
-                        color = ORANGE if row % 2 == 0 else BLUE
-                        brick = Brick(x, y, color, strength)
-                        self.bricks.append(brick)
-                
-                elif layout == "castle":
-                    # Крепость: стены по краям и основание
-                    if col == 0 or col == cols - 1 or row == rows - 1:
-                        strength = 3
-                        color = PURPLE
-                    elif row == 0:
-                        strength = 2
-                        color = ORANGE
-                    else:
-                        strength = 1
-                        color = YELLOW
-                    brick = Brick(x, y, color, strength)
-                    self.bricks.append(brick)
-                
-                elif layout == "spiral":
-                    # Спираль: прочность зависит от близости к центру
-                    min_dist = min(row, col, rows - row - 1, cols - col - 1)
-                    if min_dist == 0:
-                        strength = 3
-                        color = RED
-                    elif min_dist == 1:
-                        strength = 2
-                        color = ORANGE
-                    else:
-                        strength = 1
-                        color = YELLOW
-                    brick = Brick(x, y, color, strength)
-                    self.bricks.append(brick)
-                
-                elif layout == "dense":
-                    # Плотный слой: увеличивающаяся прочность
-                    strength = min(3, 1 + row // 2)
-                    colors_strength = [GREEN, ORANGE, RED]
-                    color = colors_strength[strength - 1]
-                    brick = Brick(x, y, color, strength)
-                    self.bricks.append(brick)
-                
-                elif layout == "boss":
-                    # Финальный босс: все кирпичи прочные
-                    if row < rows // 2:
-                        strength = 3
-                        color = PURPLE
-                    else:
-                        strength = 2
-                        color = RED
-                    brick = Brick(x, y, color, strength)
-                    self.bricks.append(brick)
-    
+                brick = Brick(x, y, color, strength)
+                self.bricks.append(brick)
+
     def spawn_bonus(self, x, y, brick_index):
         """Создание бонуса при разрушении кирпича"""
         # Проверяем, должен ли из этого кирпича выпасть бонус
