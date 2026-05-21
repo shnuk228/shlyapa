@@ -112,7 +112,7 @@ class Paddle:
         elif direction == 'right' and self.rect.right < SCREEN_WIDTH:
             self.rect.x += self.speed
     
-    def make_big(self, duration=900):
+    def make_big(self, duration=1800):
         if self.width == self.normal_width:
             self.width = self.big_width
             self.big_paddle_timer = duration
@@ -135,7 +135,8 @@ class Paddle:
         pygame.draw.rect(screen, WHITE, self.rect, 2)
         if self.big_paddle_timer > 0:
             font = pygame.font.Font(None, 20)
-            text = font.render(f"{self.big_paddle_timer // 60}", True, WHITE)
+            seconds = self.big_paddle_timer // 60
+            text = font.render(str(seconds), True, WHITE)
             screen.blit(text, (self.rect.centerx - 10, self.rect.centery - 10))
 
 # Класс кирпича
@@ -180,16 +181,18 @@ class Menu:
         try:
             with open('progress.json', 'r') as f:
                 data = json.load(f)
-                return data.get('unlocked_levels', [1])
+                unlocked_levels = data.get('unlocked_levels', [1])
+                high_scores = data.get('high_scores', {})
+                return unlocked_levels, high_scores
         except:
-            return [1]
+            return [1], {}
     
-    def draw(self, unlocked_levels):
+    def draw(self, unlocked_levels, high_scores):
         self.screen.fill(BLACK)
         
         # Заголовок
         title = self.font_big.render("АРКАНОИД", True, WHITE)
-        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 100))
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 80))
         self.screen.blit(title, title_rect)
         
         if not self.select_level_mode:
@@ -202,12 +205,19 @@ class Menu:
             
             # Отображение прогресса
             progress_text = self.font_small.render(f"Доступно уровней: {len(unlocked_levels)}", True, GREEN)
-            progress_rect = progress_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
+            progress_rect = progress_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 80))
             self.screen.blit(progress_text, progress_rect)
+            
+            # Отображение общего рекорда
+            if high_scores:
+                total_score = sum(high_scores.values())
+                total_text = self.font_small.render(f"Общий рекорд: {total_score}", True, YELLOW)
+                total_rect = total_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
+                self.screen.blit(total_text, total_rect)
         else:
             # Меню выбора уровня
             select_text = self.font_medium.render("Выберите уровень:", True, WHITE)
-            select_rect = select_text.get_rect(center=(SCREEN_WIDTH // 2, 200))
+            select_rect = select_text.get_rect(center=(SCREEN_WIDTH // 2, 160))
             self.screen.blit(select_text, select_rect)
             
             # Отображение уровней
@@ -215,24 +225,32 @@ class Menu:
             for i, level in enumerate(self.available_levels):
                 row = i // cols
                 col = i % cols
-                x = 150 + col * 140
-                y = 280 + row * 80
+                x = 130 + col * 150
+                y = 230 + row * 100
                 
                 is_unlocked = level in unlocked_levels
-                color = GREEN if is_unlocked else GRAY
+                bg_color = GREEN if is_unlocked else GRAY
                 
-                pygame.draw.rect(self.screen, color, (x, y, 100, 50), 0, 10)
-                pygame.draw.rect(self.screen, WHITE, (x, y, 100, 50), 2, 10)
+                # Рисуем кнопку уровня
+                pygame.draw.rect(self.screen, bg_color, (x, y, 120, 70), 0, 10)
+                pygame.draw.rect(self.screen, WHITE, (x, y, 120, 70), 2, 10)
                 
-                text = self.font_small.render(str(level), True, WHITE)
-                text_rect = text.get_rect(center=(x + 50, y + 25))
+                # Номер уровня
+                text = self.font_medium.render(str(level), True, WHITE)
+                text_rect = text.get_rect(center=(x + 60, y + 30))
                 self.screen.blit(text, text_rect)
                 
+                # Рекорд уровня
+                if str(level) in high_scores:
+                    score_text = self.font_small.render(f"{high_scores[str(level)]}", True, YELLOW)
+                    score_rect = score_text.get_rect(center=(x + 60, y + 55))
+                    self.screen.blit(score_text, score_rect)
+                
                 if i == self.selected:
-                    pygame.draw.rect(self.screen, YELLOW, (x - 5, y - 5, 110, 60), 3, 10)
+                    pygame.draw.rect(self.screen, YELLOW, (x - 5, y - 5, 130, 80), 3, 10)
             
             back_text = self.font_small.render("Нажмите ESC для возврата", True, WHITE)
-            back_rect = back_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
+            back_rect = back_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 40))
             self.screen.blit(back_text, back_rect)
         
         pygame.display.flip()
@@ -270,14 +288,13 @@ class Menu:
                         if selected_level in unlocked_levels:
                             return 'play', selected_level
                     else:
-                        if self.selected == 0:  # Начать игру
-                            # Начинаем с последнего доступного уровня
+                        if self.selected == 0:
                             return 'play', max(unlocked_levels)
-                        elif self.selected == 1:  # Выбрать уровень
+                        elif self.selected == 1:
                             self.select_level_mode = True
                             self.available_levels = list(range(1, 11))
                             self.selected = 0
-                        elif self.selected == 2:  # Выход
+                        elif self.selected == 2:
                             return 'quit', None
         return 'menu', None
 
@@ -330,11 +347,19 @@ class Arkanoid:
                 data = json.load(f)
                 self.unlocked_levels = data.get('unlocked_levels', [1])
                 self.high_scores = data.get('high_scores', {})
+                if isinstance(self.high_scores, dict):
+                    self.high_scores = {str(k): v for k, v in self.high_scores.items()}
         except:
             self.unlocked_levels = [1]
             self.high_scores = {}
     
     def save_progress(self):
+        current_level_str = str(self.current_level)
+        if current_level_str not in self.high_scores or self.score > self.high_scores[current_level_str]:
+            self.high_scores[current_level_str] = self.score
+            self.save_progress_callback()
+    
+    def save_progress_callback(self):
         data = {
             'unlocked_levels': self.unlocked_levels,
             'high_scores': self.high_scores
@@ -352,105 +377,83 @@ class Arkanoid:
         # Подсчет количества бонусов
         total_bricks = len(self.bricks)
         self.bonus_count = max(1, total_bricks // 5)
-        self.bonuses_spawned = 0
+        
+        # Равномерно распределяем бонусы по всем кирпичам
+        if total_bricks > 0:
+            step = total_bricks / self.bonus_count
+            self.bonus_brick_indices = [int(i * step) for i in range(self.bonus_count)]
+        else:
+            self.bonus_brick_indices = []
+        
+        self.bricks_hit_count = 0
     
     def create_bricks(self):
-        """Создание кирпичей в зависимости от уровня"""
+        """Создание кирпичей из layout уровня"""
         level_data = self.levels[self.current_level - 1]
-        rows = level_data['rows']
-        cols = level_data['cols']
-        layout = level_data['bricks_layout']
+        layout = level_data['layout']
+        
+        if not layout:
+            return
+        
+        rows = len(layout)
+        cols = len(layout[0]) if rows > 0 else 0
         
         brick_width = 70
         brick_height = 22
-        start_x = (SCREEN_WIDTH - (cols * (brick_width + 5))) // 2
+        total_width = cols * (brick_width + 5)
+        start_x = (SCREEN_WIDTH - total_width) // 2
         start_y = 60
         spacing = 5
         
-        colors = [RED, ORANGE, YELLOW, GREEN, CYAN, BLUE, PURPLE, PINK]
+        # Цвета для разной прочности
+        strength_colors = {
+            1: GREEN,
+            2: ORANGE,
+            3: RED
+        }
         
         for row in range(rows):
             for col in range(cols):
+                strength = layout[row][col]
+                
+                # Пропускаем пустые места
+                if strength == 0:
+                    continue
+                
+                # Ограничиваем прочность от 1 до 3
+                strength = max(1, min(3, strength))
+                
                 x = start_x + col * (brick_width + spacing)
                 y = start_y + row * (brick_height + spacing)
-                
-                # Разные раскладки кирпичей
-                if layout == "classic":
-                    strength = 1
-                    color = colors[row % len(colors)]
-                
-                elif layout == "pyramid":
-                    if col < rows - row - 1 or col > cols - (rows - row):
-                        continue
-                    strength = 1
-                    color = colors[row % len(colors)]
-                
-                elif layout == "zigzag":
-                    strength = 2 if (row + col) % 3 == 0 else 1
-                    color = colors[(row + col) % len(colors)]
-                
-                elif layout == "double":
-                    strength = 3 if row < 2 else 1
-                    color = colors[row % len(colors)]
-                
-                elif layout == "rainbow":
-                    strength = 1
-                    color = colors[(row + col) % len(colors)]
-                
-                elif layout == "checkerboard":
-                    if (row + col) % 2 == 0:
-                        continue
-                    strength = 1
-                    color = colors[row % len(colors)]
-                
-                elif layout == "castle":
-                    if col == 0 or col == cols - 1 or row == rows - 1:
-                        strength = 3
-                    else:
-                        strength = 1
-                    color = colors[row % len(colors)]
-                
-                elif layout == "spiral":
-                    if min(row, col, rows - row - 1, cols - col - 1) % 2 == 0:
-                        strength = 2
-                    else:
-                        strength = 1
-                    color = colors[row % len(colors)]
-                
-                elif layout == "dense":
-                    strength = min(3, 1 + row // 2)
-                    color = colors[strength - 1]
-                
-                else:  # boss
-                    strength = 3
-                    color = PURPLE
+                color = strength_colors[strength]
                 
                 brick = Brick(x, y, color, strength)
                 self.bricks.append(brick)
-    
-    def spawn_bonus(self, x, y):
+
+    def spawn_bonus(self, x, y, brick_index):
         """Создание бонуса при разрушении кирпича"""
-        if self.bonuses_spawned >= self.bonus_count:
-            return
-        
-        # Редкость бонусов
-        rand = random.random()
-        if rand < 0.15:  # +1 жизнь (редкий)
-            bonus_type = BONUS_EXTRA_LIFE
-        elif rand < 0.4:  # +3 шарика (средний)
-            bonus_type = BONUS_MULTI_BALL
-        else:  # Увеличение платформы (частый)
-            bonus_type = BONUS_BIG_PADDLE
-        
-        self.bonuses.append(Bonus(x, y, bonus_type))
-        self.bonuses_spawned += 1
+        # Проверяем, должен ли из этого кирпича выпасть бонус
+        if brick_index in self.bonus_brick_indices:
+            # Определяем тип бонуса по порядковому номеру
+            bonus_index = self.bonus_brick_indices.index(brick_index)
+            bonus_type_index = bonus_index % 3
+            
+            if bonus_type_index == 0:
+                bonus_type = BONUS_BIG_PADDLE
+            elif bonus_type_index == 1:
+                bonus_type = BONUS_MULTI_BALL
+            else:
+                bonus_type = BONUS_EXTRA_LIFE
+            
+            self.bonuses.append(Bonus(x, y, bonus_type))
+            return True
+        return False
     
     def apply_bonus(self, bonus):
         """Применение эффекта бонуса"""
         if bonus.type == BONUS_EXTRA_LIFE:
             self.lives += 1
         elif bonus.type == BONUS_MULTI_BALL:
-            # Добавляем 3 новых шарика
             for _ in range(3):
                 new_ball = Ball(self.paddle.rect.centerx, self.paddle.rect.top - 10)
                 new_ball.speed_x = random.uniform(-5, 5)
@@ -463,7 +466,6 @@ class Arkanoid:
         # Столкновение шариков с платформой
         for ball in self.balls[:]:
             if ball.rect.colliderect(self.paddle.rect):
-                # Изменение направления в зависимости от места удара
                 hit_pos = (ball.rect.centerx - self.paddle.rect.left) / self.paddle.width
                 ball.speed_x = (hit_pos - 0.5) * 8
                 ball.speed_y = -abs(ball.speed_y)
@@ -474,10 +476,15 @@ class Arkanoid:
                 if ball.rect.colliderect(brick.rect):
                     ball.speed_y = -ball.speed_y
                     if brick.hit():
+                        brick_x = brick.rect.centerx
+                        brick_y = brick.rect.centery
+                        current_brick_index = self.bricks_hit_count
+                        
                         self.bricks.remove(brick)
                         self.score += 10
-                        # Создание бонуса
-                        self.spawn_bonus(brick.rect.centerx, brick.rect.centery)
+                        
+                        self.spawn_bonus(brick_x, brick_y, current_brick_index)
+                        self.bricks_hit_count += 1
                     break
         
         # Столкновение бонусов с платформой
@@ -485,23 +492,20 @@ class Arkanoid:
             if bonus.rect.colliderect(self.paddle.rect):
                 self.apply_bonus(bonus)
                 self.bonuses.remove(bonus)
+            elif bonus.rect.top > SCREEN_HEIGHT:
+                self.bonuses.remove(bonus)
     
     def update(self):
         if self.paused or self.game_over or self.level_complete:
             return
         
-        # Обновление платформы
         self.paddle.update()
         
-        # Обновление шариков
         for ball in self.balls[:]:
             ball.update()
         
-        # Обновление бонусов
         for bonus in self.bonuses[:]:
             bonus.update()
-            if bonus.rect.top > SCREEN_HEIGHT:
-                self.bonuses.remove(bonus)
         
         # Проверка выхода шариков
         lost_balls = [ball for ball in self.balls if ball.is_off_screen()]
@@ -512,9 +516,8 @@ class Arkanoid:
         if len(self.balls) == 0:
             self.lives -= 1
             if self.lives > 0:
-                # Создаем один шарик
                 self.balls = [Ball(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100)]
-                self.paddle = Paddle()  # Сброс платформы
+                self.paddle = Paddle()
             else:
                 self.game_over = True
         
@@ -523,17 +526,16 @@ class Arkanoid:
         # Проверка победы на уровне
         if len(self.bricks) == 0:
             self.level_complete = True
+            self.save_progress()
             
-            # Сохранение прогресса
             next_level = self.current_level + 1
             if next_level <= 10 and next_level not in self.unlocked_levels:
                 self.unlocked_levels.append(next_level)
-                self.save_progress()
+                self.save_progress_callback()
     
     def draw(self):
         self.screen.fill(BLACK)
         
-        # Отрисовка объектов
         self.paddle.draw(self.screen)
         
         for ball in self.balls:
@@ -549,22 +551,27 @@ class Arkanoid:
         level_text = self.font.render(f"Уровень: {self.current_level}", True, WHITE)
         self.screen.blit(level_text, (10, 10))
         
+        # Отображение рекорда уровня
+        current_level_str = str(self.current_level)
+        if current_level_str in self.high_scores:
+            record_text = self.small_font.render(f"Рекорд: {self.high_scores[current_level_str]}", True, YELLOW)
+            self.screen.blit(record_text, (10, 45))
+        
         # Отображение счета
         score_text = self.font.render(f"Счет: {self.score}", True, WHITE)
-        self.screen.blit(score_text, (10, 50))
+        self.screen.blit(score_text, (10, 80))
         
         # Отображение жизней
         lives_text = self.font.render(f"Жизни: {self.lives}", True, WHITE)
-        self.screen.blit(lives_text, (10, 90))
+        self.screen.blit(lives_text, (10, 120))
         
         # Отображение количества шариков
         balls_text = self.small_font.render(f"Шарики: {len(self.balls)}", True, WHITE)
-        self.screen.blit(balls_text, (10, 130))
+        self.screen.blit(balls_text, (10, 160))
         
-        # Отображение оставшихся бонусов
-        bonuses_left = self.bonus_count - self.bonuses_spawned
-        bonuses_text = self.small_font.render(f"Бонусов осталось: {bonuses_left}", True, YELLOW)
-        self.screen.blit(bonuses_text, (10, 160))
+        # Отображение информации о бонусах
+        bonuses_text = self.small_font.render(f"Бонусов на уровне: {self.bonus_count}", True, GREEN)
+        self.screen.blit(bonuses_text, (10, 190))
         
         # Отображение паузы
         if self.paused:
@@ -604,19 +611,15 @@ class Arkanoid:
                 elif event.key == pygame.K_p:
                     self.paused = not self.paused
                 elif event.key == pygame.K_r and self.game_over:
-                    # Перезапуск игры с текущего уровня
                     self.__init__(self.current_level)
                 elif event.key == pygame.K_RETURN and self.level_complete:
-                    # Переход на следующий уровень
                     if self.current_level < 10:
                         self.current_level += 1
                         self.init_game_objects()
                         self.level_complete = False
                     else:
-                        # Игра пройдена
                         self.game_over = True
         
-        # Управление платформой
         if not self.paused and not self.game_over and not self.level_complete:
             keys = pygame.key.get_pressed()
             if keys[pygame.K_LEFT]:
@@ -644,8 +647,8 @@ def main():
     menu = Menu(screen)
     
     while True:
-        unlocked_levels = menu.load_progress()
-        menu.draw(unlocked_levels)
+        unlocked_levels, high_scores = menu.load_progress()
+        menu.draw(unlocked_levels, high_scores)
         action, level = menu.handle_events(unlocked_levels)
         
         if action == 'quit':
@@ -654,8 +657,6 @@ def main():
         elif action == 'play':
             game = Arkanoid(level)
             game.run()
-            # Сохраняем прогресс после игры
-            game.save_progress()
 
 if __name__ == "__main__":
     main()
