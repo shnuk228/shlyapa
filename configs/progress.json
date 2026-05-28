@@ -1,0 +1,20 @@
+{
+    "unlocked_levels": [
+        1,
+        2
+    ],
+    "high_scores": {
+        "1": 240
+    },
+    "tutorial_shown": true,
+    "stored_bonuses": [
+        3,
+        2
+    ],
+    "selected_topic": "cars",
+    "quiz_used_indices": {
+        "cars": [
+            0
+        ]
+    }
+}
